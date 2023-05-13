@@ -24,7 +24,7 @@ def read_annotations(annotation_path: Path):
     return annotation
 
 
-def plot_annotated_audio_wave(audio_path: Path, annotation: List[Dict], time_step: int = None):
+def plot_annotated_audio_wave(audio_path: Path, annotation: List[Dict] = None, time_step: int = None):
     colors = {'1': 'orange', '2': 'green'}  # Цвет для каждого класса
     audio = wave.open(str(audio_path), 'rb')
     framerate = audio.getframerate()
@@ -71,18 +71,19 @@ def plot_annotated_audio_wave(audio_path: Path, annotation: List[Dict], time_ste
     plt.xticks(time_sec, labels=xticklabels)
     plt.xlim([0, duration_ms])
 
-    # Добавляем легенду
-    file_name = audio_path.name.split('.')[0]
-    label_1 = file_name.split('__')[0]
-    label_2 = file_name.split('__')[1]
-    plt.legend(handles=[Patch(color='orange', label=label_1), Patch(color='green', label=label_2)])
+    if annotation is not None:
+        # Добавляем легенду
+        file_name = audio_path.name.split('.')[0]
+        label_1 = file_name.split('__')[0]
+        label_2 = file_name.split('__')[1]
+        plt.legend(handles=[Patch(color='orange', label=label_1), Patch(color='green', label=label_2)])
 
-    # Теперь помечаем на нем области принадлежности к каждому спикеру
-    for label in annotation:
-        color = colors[label['speaker_label']]
-        start_time = label['start_frame']
-        end_time = label['end_frame']
-        plt.plot(time[start_time:end_time], signal_array[start_time:end_time], color=color)
+        # Теперь помечаем на нем области принадлежности к каждому спикеру
+        for label in annotation:
+            color = colors[label['speaker_label']]
+            start_time = label['start_frame']
+            end_time = label['end_frame']
+            plt.plot(time[start_time:end_time], signal_array[start_time:end_time], color=color)
     plt.show()
 
 
@@ -159,11 +160,11 @@ def plot_all_dataset():
 
 def main():
     # plot_all_dataset()
-    creator = DatasetCreator(overlay_proba=0.5, random_seed=1)
-    creator.pipeline(Path('audio_test'), 1)
-    annotation = read_annotations(Path('annotation/speaker_1__speaker_3__0.csv'))
-    plot_annotated_time_frames(Path('dataset/speaker_1__speaker_3__0.wav'), annotation)
-    plot_annotated_audio_wave(Path('dataset/speaker_1__speaker_3__0.wav'), annotation)
+    creator = DatasetCreator(overlay_proba=0.5, random_seed=42)
+    creator.pipeline(Path('audio_test'), 1, noise_flag=True)
+    # annotation = read_annotations(Path('annotation/speaker_1__speaker_3__0.csv'))
+    # plot_annotated_time_frames(Path('dataset/speaker_1__speaker_3__0.wav'), annotation)
+    # plot_annotated_audio_wave(Path('dataset/speaker_1__speaker_3__0.wav'), annotation)
 
 
 if __name__ == '__main__':

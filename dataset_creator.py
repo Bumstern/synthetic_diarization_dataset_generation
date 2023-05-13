@@ -1,14 +1,16 @@
 import os
 import random
 from typing import List, Dict
-from random import shuffle, sample, choice
+from random import shuffle, sample
 from pathlib import Path
 import csv
 
-from pydub import AudioSegment, effects, generators
+from pydub import AudioSegment, effects
 from pyannote.audio import Pipeline
 import numpy as np
 from tqdm import tqdm
+from pedalboard import Pedalboard, Reverb
+from pedalboard.io import AudioFile
 
 SILENCE_DURATION_MAXIMUM = 1000             # Максимальная длительность тишины в мс
 SILENCE_DURATION_MINIMUM = 20               # Минимальная продолжительность тишины в мс (менее будут обращаться в 0)
@@ -27,13 +29,16 @@ class DatasetCreator:
         self._model_pipeline = Pipeline.from_pretrained("model/config.yaml")
         assert(0 <= overlay_proba <= 1)
         self._overlay_proba = overlay_proba
+        self._noise_data_path = Path('noise_data')
+        self._filter_board = Pedalboard([Reverb(room_size=0.25, damping=0, width=0.25)])
+
         np.random.seed(random_seed)
         random.seed(random_seed)
 
     def pipeline(self,
                  audio_source_path: Path,
                  output_size: int,
-                 noise_volume: int = -42):
+                 noise_flag: bool = False):
         # Разделяем входные аудиодорожки на фрагменты с речью
         # и собираем их в список по каждому спикеру
         speeches = []
@@ -48,14 +53,15 @@ class DatasetCreator:
         for i in tqdm(range(output_size)):
             # Выбираем двух случайных спикеров
             first_speaker_idx, second_speaker_idx = sample(range(len(speeches)), k=2)
-            first_speaker_speech = choice(speeches[first_speaker_idx])
-            second_speaker_speech = choice(speeches[second_speaker_idx])
+            first_speaker_speech = random.choice(speeches[first_speaker_idx])
+            second_speaker_speech = random.choice(speeches[second_speaker_idx])
 
             # Объединяем их в аудиотрек с разметкой
-            audio, annotation = self._create_audio_track(first_speaker_speech, second_speaker_speech, noise_volume)
+            audio, annotation = self._create_audio_track(first_speaker_speech, second_speaker_speech)
 
-            # if self._
-            audio = self._add_noise(audio)
+            # Добавляем шум
+            if noise_flag:
+                audio = self._add_noise(audio)
 
             # Сохраняем аудио и разметку
             audio_name = Path(f'{speaker_names[first_speaker_idx]}__{speaker_names[second_speaker_idx]}__{str(i)}.wav')
@@ -64,6 +70,8 @@ class DatasetCreator:
                 csv_writer = csv.DictWriter(csv_file, fieldnames=annotation[0].keys())
                 csv_writer.writeheader()
                 csv_writer.writerows(annotation)
+
+            self._add_reverberation('dataset'/audio_name)
         print('Done!')
 
     def _speech_separator(self, audio_path: Path) -> List[AudioSegment]:
@@ -91,8 +99,7 @@ class DatasetCreator:
 
     def _create_audio_track(self,
                            first_speaker: List[AudioSegment],
-                           second_speaker: List[AudioSegment],
-                           noise_volume: int = -42) -> (AudioSegment, List[Dict]):
+                           second_speaker: List[AudioSegment]) -> (AudioSegment, List[Dict]):
         """
         Объединяет случайным образом 2 спикеров в единый аудиотрек
 
@@ -207,12 +214,22 @@ class DatasetCreator:
             normalized_tracks.append(track.apply_gain(target_db))
         return normalized_tracks
 
-    @staticmethod
-    def _add_noise(audio: AudioSegment) -> AudioSegment:
-        noise = generators.WhiteNoise().to_audio_segment(duration=len(audio), volume=-3)
+    def _add_noise(self, audio: AudioSegment) -> AudioSegment:
+        rnd_noise_path = self._noise_data_path/random.choice(os.listdir(self._noise_data_path))
+        rnd_noise_path = rnd_noise_path/random.choice(os.listdir(rnd_noise_path))
+        print(rnd_noise_path)
+        noise = AudioSegment.from_wav(rnd_noise_path)
+        noise = effects.normalize(noise)
         noise = noise.set_frame_rate(GLOBAL_FRAMERATE)
-        noisy_audio = audio.overlay(noise)
+        noisy_audio = audio.overlay(noise, loop=True)
         return noisy_audio
+
+    def _add_reverberation(self, audio_path: Path):
+        with AudioFile(str(audio_path), 'r').resampled_to(GLOBAL_FRAMERATE) as f:
+            audio = f.read(f.frames)
+        effected_audio = self._filter_board(audio, GLOBAL_FRAMERATE)
+        with AudioFile(str(audio_path), 'w', GLOBAL_FRAMERATE, effected_audio.shape[0]) as f:
+            f.write(effected_audio)
 
     # def _add_interruptions(self,
     #                        audio_track: AudioSegment,
